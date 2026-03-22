@@ -2,9 +2,9 @@ from rest_framework.generics import CreateAPIView
 from rest_framework.response import Response
 from rest_framework import status
 
-from .models import Event, Notification
+from .models import Event
 from .serializers import EventSerializer
-from .tasks import send_notification
+from .services import process_event
 
 
 class EventCreateAPIView(CreateAPIView):
@@ -19,15 +19,7 @@ class EventCreateAPIView(CreateAPIView):
             event = serializer.save()
 
             # 2. Create Notification
-            notification = Notification.objects.create(
-                user=event.user,
-                event=event,
-                notification_type='EMAIL',
-                message=f"{event.event_type} triggered"
-            )
-
-            # 3. Send Async Task
-            send_notification.delay(notification.id)
+            notification = process_event(event)
 
             return Response(
                 {
