@@ -9,6 +9,11 @@ def process_event(event: Event):
     """
     logger.info(f"Processing event {event.id} of type {event.event_type} for user {event.user_id}")
     # 1. Create Notification
+    existing = Notification.objects.filter(event=event).first()
+
+    if existing:
+        return existing
+    
     notification = Notification.objects.create(
         user=event.user,
         event=event,

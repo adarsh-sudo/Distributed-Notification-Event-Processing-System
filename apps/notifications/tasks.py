@@ -7,7 +7,10 @@ from django.utils import timezone
 def send_notification(self, notification_id):
     try:
         notification = Notification.objects.get(id=notification_id)
-
+    except Notification.DoesNotExist:
+        return "Notification not found"
+    
+    try:
         print(f"Sending {notification.notification_type} to user {notification.user.username}")
 
         # simulate success
