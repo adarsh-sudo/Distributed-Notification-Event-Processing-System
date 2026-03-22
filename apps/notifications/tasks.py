@@ -1,3 +1,4 @@
+from django.utils import timezone
 from celery import shared_task
 from .models import Notification
 
@@ -11,6 +12,7 @@ def send_notification(notification_id):
 
         # simulate sending
         notification.status = 'SENT'
+        notification.sent_at = timezone.now()
         notification.save()
 
         return "Success"
