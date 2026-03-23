@@ -1,45 +1,48 @@
 from celery import shared_task
+from django.db import transaction
 from .models import Notification, NotificationLog
 from django.utils import timezone
-
 PERMANENT_ERRORS = (
-    ValueError,                 # invalid data
-    TypeError,                  # coding/data issue
-    Notification.DoesNotExist,  # wrong ID
-    PermissionError,            # no access
 )
 TEMPORARY_ERRORS = (
-    ConnectionError,        # network issue
-    TimeoutError,           # request timeout
-    OSError,                # system/network glitch
 )
 @shared_task(bind=True, max_retries=5)
 def send_notification(self, notification_id):
+
+    # STEP 1: Lock row + check status
     try:
-        notification = Notification.objects.get(id=notification_id)
+        with transaction.atomic():
+            notification = (
+                Notification.objects
+                .select_for_update()
+                .get(id=notification_id)
+            )
+
+            #  Idempotency checks
+            if notification.status == 'SENT':
+                return "Already processed"
+
+            if notification.status == 'PROCESSING':
+                return "Already being processed"
+
+            # mark as processing
+            notification.status = 'PROCESSING'
+            notification.save()
+
     except Notification.DoesNotExist:
         return "Notification not found"
-    
+
+    # STEP 2: Do actual work OUTSIDE lock
     try:
         print(f"Sending {notification.notification_type} to user {notification.user.username}")
-    
-        if notification.status == 'SENT':
-            return "Already processed"
         import random
 
-        # #  simulate different failures
-        # rand = random.choice(["success", "temp", "perm"])
 
-        # if rand == "temp":
-        #     raise ConnectionError("Temporary network issue")
-        # elif rand == "perm":
-        #     raise ValueError("Invalid email address")
-        # simulate success
+        # SUCCESS
         notification.status = 'SENT'
         notification.sent_at = timezone.now()
         notification.save()
 
-        #  create success log
         NotificationLog.objects.create(
             notification=notification,
             status='SUCCESS',
@@ -50,7 +53,7 @@ def send_notification(self, notification_id):
 
     except Exception as e:
 
-                #  PERMANENT FAILURE
+        # PERMANENT FAILURE
         if isinstance(e, PERMANENT_ERRORS):
             notification.status = 'FAILED'
             notification.failure_reason = str(e)
@@ -64,9 +67,9 @@ def send_notification(self, notification_id):
 
             return "Permanent Failure"
 
-        #  TEMPORARY FAILURE → RETRY
+        # TEMPORARY FAILURE → RETRY
         elif isinstance(e, TEMPORARY_ERRORS):
-            notification.retry_count += 1
+            notification.retry_count = self.request.retries
             notification.save()
 
             NotificationLog.objects.create(
@@ -75,12 +78,26 @@ def send_notification(self, notification_id):
                 response=f"Retry {notification.retry_count}: {str(e)}"
             )
 
-            raise self.retry(
-                exc=e,
-                countdown=2 ** self.request.retries
-            )
+            try:
+                raise self.retry(
+                    exc=e,
+                    countdown=2 ** self.request.retries
+                )
+            except self.MaxRetriesExceededError:
+                # FINAL FAILURE
+                notification.status = 'FAILED'
+                notification.failure_reason = "Max retries exceeded"
+                notification.save()
 
-        #  UNKNOWN FAILURE
+                NotificationLog.objects.create(
+                    notification=notification,
+                    status='FAILED',
+                    response="Max retries exceeded"
+                )
+
+                return "Final Failed"
+
+        # UNKNOWN FAILURE
         else:
             notification.status = 'FAILED'
             notification.failure_reason = str(e)
