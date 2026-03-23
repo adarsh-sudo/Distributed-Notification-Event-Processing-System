@@ -9,19 +9,16 @@ def process_event(event: Event):
     """
     logger.info(f"Processing event {event.id} of type {event.event_type} for user {event.user_id}")
     # 1. Create Notification
-    existing = Notification.objects.filter(event=event).first()
+    notification, created = Notification.objects.get_or_create(
+    event=event,
+    defaults={
+        "user": event.user,
+        "notification_type": "EMAIL",
+        "message": f"{event.event_type} triggered"
+            }
+        )
 
-    if existing:
-        return existing
-    
-    notification = Notification.objects.create(
-        user=event.user,
-        event=event,
-        notification_type='EMAIL',
-        message=f"{event.event_type} triggered"
-    )
-
-    # 2. Trigger async task
-    send_notification.delay(notification.id)
+    if created:
+        send_notification.delay(notification.id)
 
     return notification

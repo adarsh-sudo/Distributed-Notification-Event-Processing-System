@@ -38,7 +38,7 @@ class Notification(models.Model):
 
     notification_type = models.CharField(max_length=20, choices=NOTIFICATION_TYPES)
     message = models.TextField()
-
+    failure_reason = models.CharField(max_length=255, null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
 
     retry_count = models.IntegerField(default=0)
@@ -47,12 +47,18 @@ class Notification(models.Model):
     sent_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
-        return f"{self.notification_type} - {self.status}"
+        return f"{self.id} - {self.notification_type} - {self.status}"
     
     class Meta:
         indexes = [
             models.Index(fields=['status']),
             models.Index(fields=['notification_type']),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['event'],
+                name='unique_notification_per_event'
+            )
         ]
 
 
@@ -71,3 +77,16 @@ class NotificationLog(models.Model):
 
     def __str__(self):
         return f"{self.notification.id} - {self.status}"
+    
+
+class IdempotencyKey(models.Model):
+    key = models.CharField(max_length=255, unique=True)
+
+    response_data = models.JSONField(null=True, blank=True)
+    status_code = models.IntegerField(null=True, blank=True)
+
+    is_processing = models.BooleanField(default=False)  # 🔥 important
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.key
