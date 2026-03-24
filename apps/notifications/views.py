@@ -1,7 +1,7 @@
 from rest_framework.response import Response
 from rest_framework import status, generics
 from django.db import transaction
-
+from .utils import is_rate_limited
 from .models import IdempotencyKey
 from .services import process_event
 from .serializers import EventSerializer
@@ -11,6 +11,13 @@ class EventCreateAPIView(generics.CreateAPIView):
     serializer_class = EventSerializer
 
     def create(self, request, *args, **kwargs):
+        user_id = request.data.get("user")
+
+        if is_rate_limited(user_id):
+            return Response(
+                {"error": "Rate limit exceeded"},
+                status=status.HTTP_429_TOO_MANY_REQUESTS
+            )
         idempotency_key = request.data.get("idempotency_key")
 
         if not idempotency_key:
